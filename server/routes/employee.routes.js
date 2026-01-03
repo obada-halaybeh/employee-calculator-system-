@@ -29,7 +29,7 @@ router.get('/payslips', async (req, res, next) => {
     const [rows] = await pool.query(
       `SELECT p.payslipId, p.periodId, pp.startDate, pp.endDate,
               p.grossPay, p.totalAllowances, p.totalDeductions, p.netSalary,
-              p.status, p.generationDate
+              p.generationDate
        FROM Payslip p
        JOIN PayPeriod pp ON pp.periodId = p.periodId
        WHERE p.employeeId = ?
@@ -49,7 +49,7 @@ router.get('/payslips/:payslipId', async (req, res, next) => {
     const [rows] = await pool.query(
       `SELECT p.payslipId, p.periodId, pp.startDate, pp.endDate,
               p.grossPay, p.totalAllowances, p.totalDeductions, p.netSalary,
-              p.status, p.generationDate
+              p.generationDate
        FROM Payslip p
        JOIN PayPeriod pp ON pp.periodId = p.periodId
        WHERE p.payslipId = ? AND p.employeeId = ?`,
@@ -93,6 +93,24 @@ router.get('/advance', async (req, res, next) => {
       [userId]
     );
     return res.json(rows);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.delete('/advance/:requestId', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { requestId } = req.params;
+    const [result] = await pool.query(
+      `DELETE FROM AdvanceRequest
+       WHERE requestId = ? AND employeeId = ? AND status = 'PENDING'`,
+      [requestId, userId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Pending request not found' });
+    }
+    return res.json({ success: true });
   } catch (err) {
     return next(err);
   }

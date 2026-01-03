@@ -11,10 +11,15 @@ import SalaryDetails from './pages/hr/SalaryDetails';
 import Payroll from './pages/hr/Payroll';
 import AdvanceRequests from './pages/hr/AdvanceRequests';
 import Reports from './pages/hr/Reports';
+import PayrollDetail from './pages/hr/PayrollDetail';
+import ReportCreate from './pages/hr/ReportCreate';
+import ReportResult from './pages/hr/ReportResult';
+import HrNotifications from './pages/hr/HrNotifications';
 import EmployeeHome from './pages/employee/EmployeeHome';
 import EmployeePayslips from './pages/employee/EmployeePayslips';
 import EmployeeAdvance from './pages/employee/EmployeeAdvance';
 import EmployeeNotifications from './pages/employee/EmployeeNotifications';
+import PayslipDetail from './pages/hr/PayslipDetail';
 import ProtectedRoute from './routes/ProtectedRoute';
 import RoleRoute from './routes/RoleRoute';
 import { useAuth } from './context/AuthContext';
@@ -51,8 +56,13 @@ function App() {
           <Route path="/hr/employee-management" element={<EmployeeManagement />} />
           <Route path="/hr/salary-details" element={<SalaryDetails />} />
           <Route path="/hr/payroll" element={<Payroll />} />
+          <Route path="/hr/payroll/:periodId" element={<PayrollDetail />} />
+          <Route path="/hr/payslip/:id" element={<PayslipDetail />} />
           <Route path="/hr/advance-requests" element={<AdvanceRequests />} />
+          <Route path="/hr/notifications" element={<HrNotifications />} />
           <Route path="/hr/reports" element={<Reports />} />
+          <Route path="/hr/reports/create" element={<ReportCreate />} />
+          <Route path="/hr/reports/result" element={<ReportResult />} />
         </Route>
 
         <Route element={<RoleRoute roles={['Employee']} />}>

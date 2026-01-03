@@ -11,10 +11,12 @@ const AdvanceRequests = () => {
   const loadData = async () => {
     setError('');
     try {
-      const pendingData = await api.get('/hr/advance/pending');
-      setPending(pendingData);
-      // treat approved/rejected by filtering? backend provides only pending; show empty placeholder
-      setApproved([]);
+      const [pendingData, approvedData] = await Promise.all([
+        api.get('/hr/advance/pending'),
+        api.get('/hr/advance/approved')
+      ]);
+      setPending(pendingData || []);
+      setApproved(approvedData || []);
     } catch (err) {
       setError(err.message);
     }
@@ -59,8 +61,21 @@ const AdvanceRequests = () => {
             ))}
           </div>
           <div>
-            <h4>Approved / Rejected</h4>
-            {approved.length === 0 && <div className="muted">No approved/rejected data available</div>}
+            <h4>Approved</h4>
+            {approved.length === 0 && <div className="muted">No approved requests</div>}
+            {approved.map((r) => (
+              <div key={r.requestId} className="card" style={{ marginBottom: 10 }}>
+                <div className="flex-between">
+                  <div>
+                    <div>{r.fullName}</div>
+                    <div className="muted">{r.department || '-'}</div>
+                    <div>Amount: {r.amount}</div>
+                    <div className="muted">{r.reason}</div>
+                  </div>
+                  <div className="pill neutral">APPROVED</div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </Card>

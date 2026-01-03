@@ -20,7 +20,13 @@ const LoginPage = () => {
       else if (user.role === 'HRStaff') navigate('/hr/home');
       else navigate('/employee/home');
     } catch (err) {
-      setError(err.message || 'Login failed');
+      const message = err?.message || '';
+      const normalized = message.toLowerCase();
+      if (normalized.includes('unauthorized') || normalized.includes('invalid')) {
+        setError('Invalid username or password');
+      } else {
+        setError(message || 'Login failed');
+      }
     } finally {
       setLoading(false);
     }

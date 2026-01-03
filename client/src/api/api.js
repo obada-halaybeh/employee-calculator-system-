@@ -10,20 +10,22 @@ const api = {
     if (token) headers.Authorization = `Bearer ${token}`;
 
     const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-
-    if (res.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
-      throw new Error('Unauthorized');
-    }
-
     const text = await res.text();
     let data;
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
       data = text;
+    }
+
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      if (path !== '/auth/login') {
+        window.location.href = '/login';
+      }
+      const message = data?.message || 'Unauthorized';
+      throw new Error(message);
     }
 
     if (!res.ok) {
@@ -44,6 +46,9 @@ const api = {
   },
   patch(path, body) {
     return this.request(path, { method: 'PATCH', body: JSON.stringify(body) });
+  },
+  delete(path) {
+    return this.request(path, { method: 'DELETE' });
   }
 };
 

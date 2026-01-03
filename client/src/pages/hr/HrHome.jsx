@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Layout from '../../components/Layout';
 import api from '../../api/api';
+import { getActivities } from '../../utils/localActivity';
 
 const icons = {
   people: (
@@ -58,21 +59,35 @@ const HrHome = () => {
 
         const recent = [];
         (advances || []).slice(0, 5).forEach((a) => {
+          const createdAt = a.requestDate;
           recent.push({
-            time: formatDate(a.requestDate),
+            time: formatDate(createdAt),
             text: `Advance request from ${a.fullName || 'Employee'} for $${a.amount}`,
+            createdAt
           });
         });
         (payPeriods || []).slice(0, 3).forEach((p) => {
+          const createdAt = p.startDate;
           recent.push({
-            time: formatDate(p.startDate),
+            time: formatDate(createdAt),
             text: `Pay period ${p.periodId} is ${p.status || 'OPEN'}.`,
+            createdAt
           });
         });
-        if (recent.length === 0) {
-          recent.push({ time: '', text: 'No recent activity yet.' });
+
+        // Merge locally stored activity (e.g., report generation notifications)
+        const localActivity = (getActivities() || []).map((item) => ({
+          time: formatDate(item.createdAt),
+          text: item.message,
+          createdAt: item.createdAt
+        }));
+
+        const merged = [...localActivity, ...recent]
+          .sort((a, b) => toTimestamp(b.createdAt) - toTimestamp(a.createdAt));
+        if (merged.length === 0) {
+          merged.push({ time: '', text: 'No recent activity yet.' });
         }
-        setActivity(recent);
+        setActivity(merged);
       } catch (err) {
         setError(err.message || 'Failed to load dashboard');
       } finally {
@@ -105,7 +120,7 @@ const HrHome = () => {
         <div className="hr-activity-header">Recent Activity</div>
         {error && <div className="error">{error}</div>}
         {!error && (
-          <div className="hr-activity-list">
+          <div className="hr-activity-list scrollable">
             {activity.map((item, idx) => (
               <div key={idx} className="activity-item">
                 <div className="activity-meta">{item.time}</div>
@@ -128,6 +143,12 @@ const formatDate = (value) => {
     hour: 'numeric',
     minute: '2-digit'
   });
+};
+
+const toTimestamp = (value) => {
+  const date = value ? new Date(value) : null;
+  const time = date?.getTime();
+  return Number.isNaN(time) ? 0 : time;
 };
 
 export default HrHome;

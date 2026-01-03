@@ -7,6 +7,12 @@ const router = express.Router();
 
 router.use(requireRole('HRStaff'));
 
+const normalizeReportType = (type) => {
+  const val = String(type || '').toLowerCase();
+  const allowed = ['payroll', 'payslip', 'employee', 'advance', ''];
+  return allowed.includes(val) ? val : 'all';
+};
+
 // Employees (Employee role only)
 router.get('/employees', async (req, res, next) => {
   try {
@@ -66,6 +72,22 @@ router.put('/employees/:id', async (req, res, next) => {
     }
 
     return res.json({ message: 'Employee updated' });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.delete('/employees/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const [result] = await pool.query(
+      `DELETE FROM EmployeeUser WHERE id = ? AND role = 'Employee'`,
+      [id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+    return res.json({ message: 'Employee deleted' });
   } catch (err) {
     return next(err);
   }
@@ -193,12 +215,27 @@ router.post('/payperiods', async (req, res, next) => {
     if (!startDate || !endDate) {
       return res.status(400).json({ message: 'startDate and endDate are required' });
     }
+
+    // Prevent overlapping or duplicate periods (including same dates)
+    const [conflicts] = await pool.query(
+      `SELECT periodId, startDate, endDate
+       FROM PayPeriod
+       WHERE NOT (? > endDate OR ? < startDate)`,
+      [startDate, endDate]
+    );
+    if (conflicts.length) {
+      return res.status(409).json({ message: 'Pay period overlaps with an existing period' });
+    }
+
     const [result] = await pool.query(
       'INSERT INTO PayPeriod (startDate, endDate, status) VALUES (?, ?, ?)',
       [startDate, endDate, status]
     );
     return res.status(201).json({ periodId: result.insertId });
   } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Pay period with these dates already exists' });
+    }
     return next(err);
   }
 });
@@ -251,15 +288,14 @@ router.post('/payslips/generate', async (req, res, next) => {
 
     await connection.query(
       `INSERT INTO Payslip
-       (employeeId, periodId, grossPay, totalAllowances, totalDeductions, netSalary, generationDate, status)
-       VALUES (?, ?, ?, ?, ?, ?, CURDATE(), 'DRAFT')
+       (employeeId, periodId, grossPay, totalAllowances, totalDeductions, netSalary, generationDate)
+       VALUES (?, ?, ?, ?, ?, ?, CURDATE())
        ON DUPLICATE KEY UPDATE
          grossPay = VALUES(grossPay),
          totalAllowances = VALUES(totalAllowances),
          totalDeductions = VALUES(totalDeductions),
          netSalary = VALUES(netSalary),
-         generationDate = VALUES(generationDate),
-         status = 'DRAFT'`,
+         generationDate = VALUES(generationDate)`,
       [employeeId, periodId, grossPay, totalAllowances, totalDeductions, netSalary]
     );
 
@@ -270,8 +306,7 @@ router.post('/payslips/generate', async (req, res, next) => {
       grossPay,
       totalAllowances,
       totalDeductions,
-      netSalary,
-      status: 'DRAFT'
+      netSalary
     });
   } catch (err) {
     connection.release();
@@ -292,7 +327,7 @@ router.get('/payslips', async (req, res, next) => {
     const [rows] = await pool.query(
       `SELECT p.payslipId, p.employeeId, e.fullName, e.department, p.periodId,
               p.grossPay, p.totalAllowances, p.totalDeductions, p.netSalary,
-              p.status, p.generationDate
+              p.generationDate
        FROM Payslip p
        JOIN EmployeeUser e ON e.id = p.employeeId
        ${where}
@@ -300,6 +335,27 @@ router.get('/payslips', async (req, res, next) => {
       values
     );
     return res.json(rows);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get('/payslips/:payslipId', async (req, res, next) => {
+  try {
+    const { payslipId } = req.params;
+    const [[row]] = await pool.query(
+      `SELECT p.payslipId, p.employeeId, e.fullName, e.department, p.periodId,
+              p.grossPay, p.totalAllowances, p.totalDeductions, p.netSalary,
+              p.generationDate
+       FROM Payslip p
+       JOIN EmployeeUser e ON e.id = p.employeeId
+       WHERE p.payslipId = ?`,
+      [payslipId]
+    );
+    if (!row) {
+      return res.status(404).json({ message: 'Payslip not found' });
+    }
+    return res.json(row);
   } catch (err) {
     return next(err);
   }
@@ -314,6 +370,22 @@ router.get('/advance/pending', async (req, res, next) => {
        FROM AdvanceRequest a
        JOIN EmployeeUser e ON e.id = a.employeeId
        WHERE a.status = 'PENDING'
+       ORDER BY a.requestDate DESC`
+    );
+    return res.json(rows);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get('/advance/approved', async (req, res, next) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT a.requestId, a.requestDate, a.amount, a.reason, a.status, a.employeeId,
+              e.fullName, e.department
+       FROM AdvanceRequest a
+       JOIN EmployeeUser e ON e.id = a.employeeId
+       WHERE a.status = 'APPROVED'
        ORDER BY a.requestDate DESC`
     );
     return res.json(rows);
@@ -352,7 +424,6 @@ router.post('/reports/custom', async (req, res, next) => {
       endDate,
       employeeId,
       department,
-      payslipStatus,
       advanceStatus
     } = req.body || {};
 
@@ -363,12 +434,10 @@ router.post('/reports/custom', async (req, res, next) => {
     if (endDate) { payslipCond.push('pp.endDate <= ?'); payslipVals.push(endDate); }
     if (employeeId) { payslipCond.push('p.employeeId = ?'); payslipVals.push(employeeId); }
     if (department) { payslipCond.push('eu.department = ?'); payslipVals.push(department); }
-    if (payslipStatus) { payslipCond.push('p.status = ?'); payslipVals.push(payslipStatus); }
-
     const payslipWhere = payslipCond.length ? `WHERE ${payslipCond.join(' AND ')}` : '';
     const [payslips] = await pool.query(
       `SELECT p.payslipId, p.employeeId, eu.fullName, eu.department, p.periodId,
-              p.grossPay, p.totalAllowances, p.totalDeductions, p.netSalary, p.status, p.generationDate
+              p.grossPay, p.totalAllowances, p.totalDeductions, p.netSalary, p.generationDate
        FROM Payslip p
        JOIN EmployeeUser eu ON eu.id = p.employeeId
        JOIN PayPeriod pp ON pp.periodId = p.periodId
@@ -393,6 +462,26 @@ router.post('/reports/custom', async (req, res, next) => {
       advanceVals
     );
 
+    let employeesData = [];
+    if (!type || type === 'employee') {
+      const [rows] = await pool.query(
+        `SELECT e.id, e.fullName, e.username, e.department, e.position, e.isActive,
+                s.basicPay, s.housingAllowance, s.transportAllowance,
+                s.taxDeductionRate, s.insuranceDeductionRate
+         FROM EmployeeUser e
+         LEFT JOIN SalaryDetails s ON s.employeeId = e.id
+         WHERE e.role = 'Employee'`
+      );
+      employeesData = rows.map((row) => {
+        const gross = Number(row.basicPay || 0) + Number(row.housingAllowance || 0) + Number(row.transportAllowance || 0);
+        const deductions =
+          gross * (Number(row.taxDeductionRate || 0) / 100) +
+          gross * (Number(row.insuranceDeductionRate || 0) / 100);
+        const net = gross - deductions;
+        return { ...row, gross, net };
+      });
+    }
+
     const summary = {
       totalEmployees: new Set(payslips.map((p) => p.employeeId)).size,
       totalNetSalary: payslips.reduce((sum, p) => sum + Number(p.netSalary || 0), 0),
@@ -401,11 +490,25 @@ router.post('/reports/custom', async (req, res, next) => {
     };
 
     const result = {};
-    if (!type || type === 'payslip') result.payslips = payslips;
+    if (!type || type === 'payslip' || type === 'payroll') result.payslips = payslips;
     if (!type || type === 'advance') result.advances = advances;
+    if (!type || type === 'employee') result.employees = employeesData;
     result.summary = summary;
 
-    return res.json(result);
+    let reportId = null;
+    try {
+      const content = JSON.stringify({ filters: req.body || {}, result });
+      const normalizedType = normalizeReportType(type);
+      const [insert] = await pool.query(
+        'INSERT INTO Report (type, content, generatedById, periodId) VALUES (?, ?, ?, ?)',
+        [normalizedType || 'all', content, req.user.id, periodId || null]
+      );
+      reportId = insert.insertId;
+    } catch (storeErr) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to store report', storeErr);
+    }
+    return res.json({ ...result, reportId });
   } catch (err) {
     return next(err);
   }
@@ -413,7 +516,7 @@ router.post('/reports/custom', async (req, res, next) => {
 
 router.post('/reports/export', async (req, res, next) => {
   try {
-    const { periodId, startDate, endDate, employeeId, department, payslipStatus } = req.body || {};
+    const { periodId, startDate, endDate, employeeId, department } = req.body || {};
     const cond = [];
     const vals = [];
     if (periodId) { cond.push('p.periodId = ?'); vals.push(periodId); }
@@ -421,12 +524,11 @@ router.post('/reports/export', async (req, res, next) => {
     if (endDate) { cond.push('pp.endDate <= ?'); vals.push(endDate); }
     if (employeeId) { cond.push('p.employeeId = ?'); vals.push(employeeId); }
     if (department) { cond.push('eu.department = ?'); vals.push(department); }
-    if (payslipStatus) { cond.push('p.status = ?'); vals.push(payslipStatus); }
     const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
 
     const [rows] = await pool.query(
       `SELECT p.payslipId, p.employeeId, eu.fullName, eu.department, p.periodId,
-              p.grossPay, p.totalAllowances, p.totalDeductions, p.netSalary, p.status, p.generationDate
+              p.grossPay, p.totalAllowances, p.totalDeductions, p.netSalary, p.generationDate
        FROM Payslip p
        JOIN EmployeeUser eu ON eu.id = p.employeeId
        JOIN PayPeriod pp ON pp.periodId = p.periodId
@@ -438,6 +540,60 @@ router.post('/reports/export', async (req, res, next) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=\"payslips.csv\"');
     return res.send(csv);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get('/reports/saved', async (req, res, next) => {
+  try {
+    const { type } = req.query;
+    const cond = [];
+    const vals = [];
+    if (type) {
+      cond.push('type = ?');
+      vals.push(normalizeReportType(type));
+    }
+    const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
+    const [rows] = await pool.query(
+      `SELECT reportId, type, generatedById, periodId, createdAt
+       FROM Report
+       ${where}
+       ORDER BY createdAt DESC
+       LIMIT 100`,
+      vals
+    );
+    return res.json(rows);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get('/reports/saved/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const [[row]] = await pool.query(
+      'SELECT reportId, type, generatedById, periodId, createdAt, content FROM Report WHERE reportId = ?',
+      [id]
+    );
+    if (!row) {
+      return res.status(404).json({ message: 'Report not found' });
+    }
+    let parsed = {};
+    try {
+      parsed = JSON.parse(row.content || '{}');
+    } catch {
+      parsed = {};
+    }
+    return res.json({
+      reportId: row.reportId,
+      type: row.type,
+      generatedById: row.generatedById,
+      periodId: row.periodId,
+      createdAt: row.createdAt,
+      filters: parsed.filters || {},
+      result: parsed.result || {}
+    });
   } catch (err) {
     return next(err);
   }

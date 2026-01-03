@@ -3,6 +3,9 @@ const pool = require('./db');
 const { hashPassword } = require('./utils/password');
 
 async function seedAdmin() {
+  if (pool.ready) {
+    await pool.ready;
+  }
   const connection = await pool.getConnection();
   try {
     const [admins] = await connection.query(

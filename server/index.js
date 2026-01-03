@@ -36,7 +36,21 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 const port = process.env.PORT || 5000;
-app.listen(port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Server listening on port ${port}`);
-});
+
+async function start() {
+  try {
+    if (pool.ready) {
+      await pool.ready;
+    }
+    app.listen(port, () => {
+      // eslint-disable-next-line no-console
+      console.log(`Server listening on port ${port}`);
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to start server', err);
+    process.exit(1);
+  }
+}
+
+start();

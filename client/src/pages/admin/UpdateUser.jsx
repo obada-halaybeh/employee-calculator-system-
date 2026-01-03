@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import Card from '../../components/Card';
 import api from '../../api/api';
+import { useAuth } from '../../context/AuthContext';
 
 const UpdateUser = () => {
   const { id } = useParams();
@@ -10,6 +11,8 @@ const UpdateUser = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
+  const isSelf = user && String(user.id) === String(id);
 
   const loadUser = async () => {
     setError('');
@@ -43,6 +46,10 @@ const UpdateUser = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSelf) {
+      setError('You cannot edit your own account.');
+      return;
+    }
     setError('');
     setSuccess('');
     setLoading(true);
@@ -75,35 +82,38 @@ const UpdateUser = () => {
       <div className="add-user-page">
         <Card title={`Update User #${id}`} className="add-user-card">
           <form className="add-user-form" onSubmit={handleSubmit}>
-            <label>
-              User Name
-              <input name="username" value={form.username} onChange={handleChange} required placeholder="User Name" />
-            </label>
-            <label>
-              Password (leave blank to keep)
-              <input name="password" type="password" value={form.password} onChange={handleChange} placeholder="Password" />
-            </label>
-            <label>
-              Role
-              <select name="role" value={form.role} onChange={handleChange}>
-                <option value="Admin">Admin</option>
-                <option value="HRStaff">HRStaff</option>
-                <option value="Employee">Employee</option>
-              </select>
-            </label>
-            <label>
-              Employee Name
-              <input name="fullName" value={form.fullName} onChange={handleChange} required placeholder="Employee Name" />
-            </label>
-            <label className="toggle-row">
-              <input type="checkbox" name="isActive" checked={form.isActive} onChange={handleChange} />
-              Active
-            </label>
+            <fieldset disabled={isSelf || loading} style={{ border: 'none', padding: 0, margin: 0 }}>
+              <label>
+                User Name
+                <input name="username" value={form.username} onChange={handleChange} required placeholder="User Name" />
+              </label>
+              <label>
+                Password (leave blank to keep)
+                <input name="password" type="password" value={form.password} onChange={handleChange} placeholder="Password" />
+              </label>
+              <label>
+                Role
+                <select name="role" value={form.role} onChange={handleChange}>
+                  <option value="Admin">Admin</option>
+                  <option value="HRStaff">HRStaff</option>
+                  <option value="Employee">Employee</option>
+                </select>
+              </label>
+              <label>
+                Employee Name
+                <input name="fullName" value={form.fullName} onChange={handleChange} required placeholder="Employee Name" />
+              </label>
+              <label className="toggle-row">
+                <input type="checkbox" name="isActive" checked={form.isActive} onChange={handleChange} />
+                Active
+              </label>
+            </fieldset>
             <div>
+              {isSelf && <div className="error">You cannot edit your own account.</div>}
               {error && <div className="error">{error}</div>}
               {success && <div className="success">{success}</div>}
             </div>
-            <button className="btn primary add-user-submit" type="submit" disabled={loading}>
+            <button className="btn primary add-user-submit" type="submit" disabled={loading || isSelf}>
               {loading ? 'Saving...' : 'Save Changes'}
             </button>
           </form>

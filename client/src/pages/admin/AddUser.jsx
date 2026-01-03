@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Layout from '../../components/Layout';
 import Card from '../../components/Card';
 import api from '../../api/api';
@@ -11,9 +11,23 @@ const AddUser = () => {
     fullName: '',
     isActive: true
   });
+  const [usernames, setUsernames] = useState([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const loadUsernames = async () => {
+      try {
+        const users = await api.get('/admin/users');
+        setUsernames(users.map((u) => (u.username || '').toLowerCase()));
+      } catch (err) {
+        // surface later if needed
+        setError(err.message || 'Failed to load users');
+      }
+    };
+    loadUsernames();
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -24,10 +38,20 @@ const AddUser = () => {
     e.preventDefault();
     setError('');
     setSuccess('');
+    const username = form.username.trim();
+    if (!username) {
+      setError('Username is required');
+      return;
+    }
+    if (usernames.includes(username.toLowerCase())) {
+      setError('Username already exists');
+      return;
+    }
     setLoading(true);
     try {
-      await api.post('/admin/users', form);
+      await api.post('/admin/users', { ...form, username });
       setSuccess('User created');
+      setUsernames((prev) => [...prev, username.toLowerCase()]);
       setForm({
         username: '',
         password: '',
